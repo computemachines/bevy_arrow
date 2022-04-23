@@ -8,7 +8,7 @@ use bevy::{
     prelude::*,
     reflect::{TypeUuid, Uuid},
     render::{
-        mesh::{GpuBufferInfo, Indices},
+        mesh::{GpuBufferInfo, Indices, MeshVertexAttribute},
         render_asset::{RenderAsset, RenderAssets},
         render_component::{ExtractComponent, ExtractComponentPlugin},
         render_phase::{
@@ -19,11 +19,11 @@ use bevy::{
             BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
             BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource, BindingType,
             BlendState, Buffer, BufferBindingType, BufferInitDescriptor, BufferUsages,
-            ColorTargetState, ColorWrites, FragmentState, FrontFace, MultisampleState, PolygonMode,
-            PrimitiveState, PrimitiveTopology, RenderPipelineCache, RenderPipelineDescriptor,
-            SamplerBindingType, ShaderStages, SpecializedPipeline, SpecializedPipelines,
-            TextureFormat, TextureSampleType, TextureViewDimension, VertexAttribute,
-            VertexBufferLayout, VertexFormat, VertexState, VertexStepMode,
+            ColorTargetState, ColorWrites, FragmentState, FrontFace, MultisampleState,
+            PipelineCache, PolygonMode, PrimitiveState, PrimitiveTopology,
+            RenderPipelineDescriptor, SamplerBindingType, ShaderStages, SpecializedRenderPipeline,
+            SpecializedRenderPipelines, TextureFormat, TextureSampleType, TextureViewDimension,
+            VertexAttribute, VertexBufferLayout, VertexFormat, VertexState, VertexStepMode,
         },
         renderer::RenderDevice,
         texture::BevyDefault,
@@ -67,7 +67,7 @@ impl Plugin for ArrowPlugin {
         render_app
             .init_resource::<MyImageBindGroups>()
             .init_resource::<ArrowInstancePipeline>()
-            .init_resource::<SpecializedPipelines<ArrowInstancePipeline>>()
+            .init_resource::<SpecializedRenderPipelines<ArrowInstancePipeline>>()
             .add_system_to_stage(RenderStage::Extract, extract_arrow_instances)
             .add_system_to_stage(RenderStage::Queue, queue_arrow_instances)
             .add_system_to_stage(RenderStage::Prepare, prepare_instance_buffers);
@@ -75,7 +75,8 @@ impl Plugin for ArrowPlugin {
 }
 
 // name for vertex attribute. Bevy puts attributes in alphabetical order.
-pub const ATTRIBUTE_WEIGHT: &'static str = "Vertex_Weight";
+pub const ATTRIBUTE_WEIGHT: MeshVertexAttribute =
+    MeshVertexAttribute::new("Vertex_Weight", 175144769, VertexFormat::Float32);
 
 // Marker component for `ArrowsBundle`.
 #[derive(Component, Default)]
@@ -146,7 +147,13 @@ fn extract_arrow_instances(
 ) {
     let mut arrows_by_type = HashMap::default();
 
-    for Arrow { tail, head, arrow_frame, width } in arrows.iter() {
+    for Arrow {
+        tail,
+        head,
+        arrow_frame,
+        width,
+    } in arrows.iter()
+    {
         let mut arrows = arrows_by_type.entry(*arrow_frame).or_insert(Vec::new());
 
         use bevy::math::Vec3Swizzles;
@@ -159,14 +166,14 @@ fn extract_arrow_instances(
                     .mul_transform(
                         Transform::from_translation(*head)
                             .with_rotation(Quat::from_rotation_z(angle))
-                            .with_scale(Vec3::splat(width/2.0)),
+                            .with_scale(Vec3::splat(width / 2.0)),
                     )
                     .compute_matrix(),
                 tail_global_transform: transform
                     .mul_transform(
                         Transform::from_translation(*tail)
                             .with_rotation(Quat::from_rotation_z(angle))
-                            .with_scale(Vec3::splat(width/2.0)),
+                            .with_scale(Vec3::splat(width / 2.0)),
                     )
                     .compute_matrix(),
             });
@@ -206,8 +213,8 @@ fn queue_arrow_instances(
     mut render_device: ResMut<RenderDevice>,
     transparent_draw_functions: Res<DrawFunctions<Transparent2d>>,
     arrow_instance_pipeline: Res<ArrowInstancePipeline>,
-    mut pipelines: ResMut<SpecializedPipelines<ArrowInstancePipeline>>,
-    mut pipeline_cache: ResMut<RenderPipelineCache>,
+    mut pipelines: ResMut<SpecializedRenderPipelines<ArrowInstancePipeline>>,
+    mut pipeline_cache: ResMut<PipelineCache>,
     msaa: Res<Msaa>,
 
     arrow_instances: Query<
@@ -356,13 +363,16 @@ impl EntityRenderCommand for SetArrowTextureBindGroup {
         //     "SetArrowTextureBindGroup.render( {:?} )",
         //     extracted_arrow_texture.image_handle_id
         // );
-        let bind_group = image_bind_groups
+        if let Some(bind_group) = image_bind_groups
             .into_inner()
             .values
             .get(&Handle::weak(extracted_arrow_texture.image_handle_id))
-            .unwrap();
-        pass.set_bind_group(2, bind_group, &[]);
-        RenderCommandResult::Success
+        {
+            pass.set_bind_group(2, bind_group, &[]);
+            return RenderCommandResult::Success;
+        } else {
+            return RenderCommandResult::Failure;
+        }
     }
 }
 
@@ -387,7 +397,7 @@ impl EntityRenderCommand for DrawArrowInstanced {
     ) -> bevy::render::render_phase::RenderCommandResult {
         let mesh_handle = &mesh2d_query.get(item).unwrap().0;
         // info!("DrawArrowInstanced#render({:?})", item);
-        let instance_buffer = instance_buffer_query.get(item).unwrap();
+        let instance_buffer = instance_buffer_query.get_inner(item).unwrap();
 
         if let Some(gpu_mesh) = meshes.into_inner().get(mesh_handle) {
             pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
@@ -451,7 +461,7 @@ impl FromWorld for ArrowInstancePipeline {
     }
 }
 
-impl SpecializedPipeline for ArrowInstancePipeline {
+impl SpecializedRenderPipeline for ArrowInstancePipeline {
     type Key = Mesh2dPipelineKey;
 
     // configure the buffer layouts, bind groups and shader modules.
@@ -460,12 +470,11 @@ impl SpecializedPipeline for ArrowInstancePipeline {
         key: Self::Key,
     ) -> bevy::render::render_resource::RenderPipelineDescriptor {
         let vertex_attributes = vec![
-            // VertexAttribute {
-            //     // color
-            //     format: VertexFormat::Float32x4,
-            //     offset: 0,
-            //     shader_location: 0,
-            // },
+            // this is the bevy-0.7.0 way
+            // TODO: move to higher level api.
+            // Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
+            // Mesh::ATTRIBUTE_UV_0.at_shader_location(1),
+            // ATTRIBUTE_WEIGHT.at_shader_location(2),
             VertexAttribute {
                 //position
                 format: VertexFormat::Float32x3,

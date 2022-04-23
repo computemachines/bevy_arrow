@@ -40,9 +40,9 @@ fn unit_quad_strip_x_splits(
         i += 1;
     }
 
-    quads.set_attribute(Mesh::ATTRIBUTE_POSITION, v_pos);
-    quads.set_attribute(Mesh::ATTRIBUTE_UV_0, v_uv);
-    quads.set_attribute(ATTRIBUTE_WEIGHT, v_weight);
+    quads.insert_attribute(Mesh::ATTRIBUTE_POSITION, v_pos);
+    quads.insert_attribute(Mesh::ATTRIBUTE_UV_0, v_uv);
+    quads.insert_attribute(ATTRIBUTE_WEIGHT, v_weight);
     quads.set_indices(Some(Indices::U32(indices)));
 
     quads
