@@ -124,7 +124,12 @@ pub struct ExtractedArrowInstance {
 //    ));
 // }
 #[derive(Component)]
-pub struct Arrow(pub Vec3, pub Vec3, pub Entity);
+pub struct Arrow {
+    pub tail: Vec3,
+    pub head: Vec3,
+    pub arrow_frame: Entity,
+    pub width: f32,
+}
 
 #[derive(Component, Clone, Copy)]
 struct ExtractedArrowTexture {
@@ -141,25 +146,27 @@ fn extract_arrow_instances(
 ) {
     let mut arrows_by_type = HashMap::default();
 
-    for Arrow(tail, head, entity) in arrows.iter() {
-        let mut arrows = arrows_by_type.entry(*entity).or_insert(Vec::new());
+    for Arrow { tail, head, arrow_frame, width } in arrows.iter() {
+        let mut arrows = arrows_by_type.entry(*arrow_frame).or_insert(Vec::new());
 
         use bevy::math::Vec3Swizzles;
         let pointer = head.xy() - tail.xy();
         let angle = -pointer.angle_between(Vec2::X);
 
-        if let Ok(transform) = global_transforms.get(*entity) {
+        if let Ok(transform) = global_transforms.get(*arrow_frame) {
             arrows.push(ExtractedArrowInstance {
                 head_global_transform: transform
                     .mul_transform(
                         Transform::from_translation(*head)
-                            .with_rotation(Quat::from_rotation_z(angle)).with_scale(Vec3::splat(10.0)),
+                            .with_rotation(Quat::from_rotation_z(angle))
+                            .with_scale(Vec3::splat(width/2.0)),
                     )
                     .compute_matrix(),
                 tail_global_transform: transform
                     .mul_transform(
                         Transform::from_translation(*tail)
-                            .with_rotation(Quat::from_rotation_z(angle)).with_scale(Vec3::splat(10.0)),
+                            .with_rotation(Quat::from_rotation_z(angle))
+                            .with_scale(Vec3::splat(width/2.0)),
                     )
                     .compute_matrix(),
             });
@@ -329,6 +336,7 @@ fn prepare_instance_buffers(
     }
 }
 
+// The `EntityRenderCommand` that sets arrow texture bindgroups.
 struct SetArrowTextureBindGroup;
 impl EntityRenderCommand for SetArrowTextureBindGroup {
     type Param = (SRes<MyImageBindGroups>, SQuery<Read<ExtractedArrowTexture>>);
@@ -477,7 +485,7 @@ impl SpecializedPipeline for ArrowInstancePipeline {
                 shader_location: 2,
             },
         ];
-        let vertex_array_stride = 4 *3 + 4 * 2 + 4 * 1;
+        let vertex_array_stride = 4 * 3 + 4 * 2 + 4 * 1;
 
         let instance_vertex_attributes = vec![
             VertexAttribute {
